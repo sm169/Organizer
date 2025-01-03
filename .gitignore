@@ -1,0 +1,15 @@
+# Ignore system files
+*.tmp
+*.bak
+*.swp
+.DS_Store
+
+# Ignore PowerShell history
+*.history
+
+# Ignore Git-related files
+.git/
+
+# Ignore specific folders
+node_modules/
+savedstates/
