@@ -83,6 +83,11 @@ function Get-AllWindows {
 function Show-AssignmentDialog {
     param($windows, $projects, $existingAssignments)
 
+    # Ensure $existingAssignments is initialized
+    if (-not $existingAssignments) {
+        $existingAssignments = @{}
+    }
+
     # Create the form
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Assign Windows to Projects"
@@ -101,10 +106,6 @@ function Show-AssignmentDialog {
     foreach ($window in $windows) {
         $item = New-Object System.Windows.Forms.ListViewItem($window.Title)
 
-        if (-not $existingAssignments) {
-            $existingAssignments = @{}
-        }
-        
         # Check existing assignments
         if ($existingAssignments.ContainsKey($window.Title)) {
             $assignedProject = $existingAssignments[$window.Title]
@@ -131,12 +132,33 @@ function Show-AssignmentDialog {
     $btnAssign.Add_Click({
         foreach ($item in $listView.SelectedItems) {
             if ($comboBox.SelectedItem -eq "Skip All") {
-                $item.SubItems[1].Text = "Skipped"
+                $item.SubItems[1] = "Skipped"
             } else {
-                $item.SubItems[1].Text = $comboBox.SelectedItem
+                $item.SubItems[1] = $comboBox.SelectedItem
             }
         }
     })
+
+    # Save button
+    $btnSave = New-Object System.Windows.Forms.Button
+    $btnSave.Location = New-Object System.Drawing.Point(580, 500)
+    $btnSave.Size = New-Object System.Drawing.Size(200, 30)
+    $btnSave.Text = "Save Assignments"
+    $btnSave.DialogResult = [System.Windows.Forms.DialogResult]::OK
+
+    # Add controls to the form
+    $form.Controls.AddRange(@($listView, $comboBox, $btnAssign, $btnSave))
+
+    # Show dialog and process results
+    if ($form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $assignments = $existingAssignments.Clone()  # Start with existing assignments
+        foreach ($item in $listView.Items) {
+            $assignments[$item.Text] = $item.SubItems[1]
+        }
+        return $assignments
+    }
+    return $null
+}
 
     # Save button
     $btnSave = New-Object System.Windows.Forms.Button
