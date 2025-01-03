@@ -79,9 +79,9 @@ function Get-AllWindows {
     return $windows
 }
 
-# Function to display a GUI for assigning windows to projects
-function Show-AssignmentDialog {
-    param($windows, $projects, $existingAssignments)
+function Show-MainGui {
+# Function to display a GUI for assigning windows to projectsfunction Show-MainGui {
+    param($windows, $projects, $existingAssignments, $activeProject, $lastInteractedWindow)
 
     # Ensure $existingAssignments is initialized
     if (-not $existingAssignments) {
@@ -90,10 +90,22 @@ function Show-AssignmentDialog {
 
     # Create the form
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Assign Windows to Projects"
-    $form.Size = New-Object System.Drawing.Size(800, 600)
+    $form.Text = "Project Management and Assignments"
+    $form.Size = New-Object System.Drawing.Size(1000, 700)
 
-    # Create the list view
+    # Label for Active Project
+    $lblActiveProject = New-Object System.Windows.Forms.Label
+    $lblActiveProject.Location = New-Object System.Drawing.Point(10, 520)
+    $lblActiveProject.Size = New-Object System.Drawing.Size(500, 20)
+    $lblActiveProject.Text = "Active Project: $activeProject"
+
+    # Label for Last Interacted Window
+    $lblLastInteracted = New-Object System.Windows.Forms.Label
+    $lblLastInteracted.Location = New-Object System.Drawing.Point(10, 550)
+    $lblLastInteracted.Size = New-Object System.Drawing.Size(500, 20)
+    $lblLastInteracted.Text = "Last Interacted Window: None"
+
+    # Create the list view for window assignments
     $listView = New-Object System.Windows.Forms.ListView
     $listView.View = [System.Windows.Forms.View]::Details
     $listView.FullRowSelect = $true
@@ -150,62 +162,64 @@ function Show-AssignmentDialog {
         Write-Host "Assignments saved successfully."
     })
 
-    # Add controls to the form
-    $form.Controls.AddRange(@($listView, $comboBox, $btnAssign, $btnSave))
-
-    # Show the form
-    $form.ShowDialog() | Out-Null
-}
-
-function Show-ProjectManagementDialog {
-    # Create the form
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Project Management"
-    $form.Size = New-Object System.Drawing.Size(400, 300)
-
     # Button: Close Active Project
     $btnCloseProject = New-Object System.Windows.Forms.Button
-    $btnCloseProject.Location = New-Object System.Drawing.Point(50, 50)
-    $btnCloseProject.Size = New-Object System.Drawing.Size(300, 30)
+    $btnCloseProject.Location = New-Object System.Drawing.Point(800, 50)
+    $btnCloseProject.Size = New-Object System.Drawing.Size(180, 30)
     $btnCloseProject.Text = "Close Active Project"
     $btnCloseProject.Add_Click({
         Close-ActiveProject
+        if ($lblActiveProject -ne $null) {
+            $lblActiveProject.Text = "Active Project: None"
+        }
     })
 
     # Button: Set Active Project
     $btnSetActive = New-Object System.Windows.Forms.Button
-    $btnSetActive.Location = New-Object System.Drawing.Point(50, 100)
-    $btnSetActive.Size = New-Object System.Drawing.Size(300, 30)
+    $btnSetActive.Location = New-Object System.Drawing.Point(800, 100)
+    $btnSetActive.Size = New-Object System.Drawing.Size(180, 30)
     $btnSetActive.Text = "Set Active Project"
     $btnSetActive.Add_Click({
         $newProject = Read-Host "Enter new active project"
         Set-ActiveProject -newProject $newProject
+        if ($lblActiveProject -ne $null) {
+            $lblActiveProject.Text = "Active Project: $newProject"
+        }
     })
 
     # Button: Track Last Interacted Window
     $btnTrackWindow = New-Object System.Windows.Forms.Button
-    $btnTrackWindow.Location = New-Object System.Drawing.Point(50, 150)
-    $btnTrackWindow.Size = New-Object System.Drawing.Size(300, 30)
+    $btnTrackWindow.Location = New-Object System.Drawing.Point(800, 150)
+    $btnTrackWindow.Size = New-Object System.Drawing.Size(180, 30)
     $btnTrackWindow.Text = "Track Last Interacted Window"
     $btnTrackWindow.Add_Click({
         Track-LastInteractedWindow
+        if ($lastInteractedWindow -and $lblLastInteracted -ne $null) {
+            $lblLastInteracted.Text = "Last Interacted Window: $($lastInteractedWindow.Title)"
+        }
     })
 
     # Button: Add Last Interacted Window to Active Project
     $btnAddWindow = New-Object System.Windows.Forms.Button
-    $btnAddWindow.Location = New-Object System.Drawing.Point(50, 200)
-    $btnAddWindow.Size = New-Object System.Drawing.Size(300, 30)
+    $btnAddWindow.Location = New-Object System.Drawing.Point(800, 200)
+    $btnAddWindow.Size = New-Object System.Drawing.Size(180, 30)
     $btnAddWindow.Text = "Add Last Interacted Window to Active Project"
     $btnAddWindow.Add_Click({
         Add-LastInteractedToActive
     })
 
     # Add controls to the form
-    $form.Controls.AddRange(@($btnCloseProject, $btnSetActive, $btnTrackWindow, $btnAddWindow))
+    $form.Controls.AddRange(@($listView, $comboBox, $btnAssign, $btnSave, $btnCloseProject, $btnSetActive, $btnTrackWindow, $btnAddWindow, $lblActiveProject, $lblLastInteracted))
 
-    # Show the form
-    $form.ShowDialog() | Out-Null
+    # Show the form non-blocking
+    $form.Show()
+
+    # Event loop to keep the GUI responsive
+    while ($form.Visible) {
+        Start-Sleep -Milliseconds 100
+    }
 }
+
 
 
 
@@ -365,9 +379,9 @@ function Start-Monitoring {
             $assignments[$window.Title] = $assignedProjects
         }
 
-        Write-Host "Launching assignment dialog..."
-        $assignments = Show-AssignmentDialog -windows $windows -projects $projects
-        
+        Write-Host "Launching gui..."
+        Show-MainGui -windows $windows -projects $projects -existingAssignments $existingAssignments -activeProject $activeProject -lastInteractedWindow $lastInteractedWindow
+
 
         # Save updated assignments
         Save-FilteredAssignments -assignments $assignments -projectsPath $projectsPath -projects $projects
@@ -379,8 +393,7 @@ function Start-Monitoring {
     }
 }
 
-# Start the GUI for project management
-Show-ProjectManagementDialog
+
 
 # Start the monitoring process
 Start-Monitoring
