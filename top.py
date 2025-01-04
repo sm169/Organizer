@@ -35,6 +35,7 @@ def save_top_assignments(assignments):
 def save_project_programs(project_name, programs):
     project_path = os.path.join(PROJECTS_PATH, project_name)
     project_file = os.path.join(project_path, "current_programs.json")
+    print("saving to", project_file)
 
     # Ensure the project folder exists
     if not os.path.exists(project_path):
@@ -54,41 +55,67 @@ def get_open_windows():
 
 
 # Real-time update function for the GUI
-def update_assignments(tree, assignments):
+def update_assignments(tree, new_windows_tree, assignments, last_assignments, new_assignments):
     while True:
         windows = get_open_windows()
-        current_items = tree.get_children()
+        new_windows = set(windows) - set(last_assignments.keys())
 
-        # Update the Treeview with new or removed windows
-        for window in windows:
-            if window and window not in assignments:
-                assignments[window] = "Unassigned"
-                tree.insert("", tk.END, iid=window, values=(window, assignments[window]))
+        # Handle new windows: Add to assignments as "Unassigned" and track in new_assignments
+        for new_window in new_windows:
+            if new_window not in assignments:
+                assignments[new_window] = "Unassigned"
+                new_assignments[new_window] = "Unassigned"
+                if not new_windows_tree.exists(new_window):  # Add to the new windows table
+                    new_windows_tree.insert("", tk.END, iid=new_window, values=(new_window,))
 
-        for item in current_items:
-            if item not in windows:
+        # Remove closed windows from assignments and last_assignments
+        closed_windows = set(last_assignments.keys()) - set(windows)
+        for closed_window in closed_windows:
+            assignments.pop(closed_window, None)
+            last_assignments.pop(closed_window, None)
+
+            # Remove closed windows from the new windows tree
+            if new_windows_tree.exists(closed_window):
+                new_windows_tree.delete(closed_window)
+
+        # Group and update the left-hand Treeview
+        assignment_groups = {}  # Group windows by their assigned project
+        for window, project in assignments.items():
+            if project not in assignment_groups:
+                assignment_groups[project] = []
+            assignment_groups[project].append(window)
+
+        for project, group_windows in assignment_groups.items():
+            if not tree.exists(project):  # Add group header if missing
+                tree.insert("", tk.END, iid=project, text=project, open=True)
+
+            existing_items = set(tree.get_children(project))
+            for window in group_windows:
+                if not tree.exists(window):  # Add only if it doesn't already exist
+                    tree.insert(project, tk.END, iid=window, text=window)
+
+        # Remove items no longer present in the current assignments
+        all_tree_items = {item for group in tree.get_children() for item in tree.get_children(group)}
+        for item in all_tree_items:
+            if item not in assignments:
                 tree.delete(item)
 
-        # Update assignment column in real-time
-        for window in windows:
-            if window in assignments:
-                tree.item(window, values=(window, assignments[window]))
-
-        # Save the top assignments file
+        # Save updated assignments and project programs
         save_top_assignments(assignments)
-
-        # Save programs assigned to each project
-        project_programs = {}
-        for window, project in assignments.items():
+        for project, group_windows in assignment_groups.items():
             if project != "Unassigned":
-                if project not in project_programs:
-                    project_programs[project] = []
-                project_programs[project].append(window)
+                save_project_programs(project, group_windows)
 
-        for project, programs in project_programs.items():
-            save_project_programs(project, programs)
+        # Update last_assignments to match the current state
+        last_assignments.clear()
+        last_assignments.update(assignments)
+
+        # Reset new_assignments for the next cycle
+        new_assignments.clear()
 
         time.sleep(2)
+
+
 
 
 # GUI setup
@@ -97,46 +124,84 @@ def setup_gui():
 
     root = tk.Tk()
     root.title("Window Project Manager")
-    root.geometry("900x600")
+    root.geometry("1200x800")
 
-    # Treeview for windows and assignments
-    tree = ttk.Treeview(root, columns=("Window", "Assignment"), show="headings", selectmode="browse")
-    tree.heading("Window", text="Window Title")
-    tree.heading("Assignment", text="Project Assignment")
+    # Left Frame: Assigned Windows by Project
+    left_frame = tk.Frame(root)
+    left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    left_label = tk.Label(left_frame, text="Assigned Windows by Project", font=("Arial", 12, "bold"))
+    left_label.pack(anchor="w", padx=10, pady=5)
+
+    tree = ttk.Treeview(left_frame, columns=(), show="tree", selectmode="extended")
+    tree.heading("#0", text="Assigned Windows")
     tree.pack(fill=tk.BOTH, expand=True)
+
+    # Right Frame: Newly Detected Windows
+    right_frame = tk.Frame(root)
+    right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+    right_label = tk.Label(right_frame, text="Newly Detected Windows", font=("Arial", 12, "bold"))
+    right_label.pack(anchor="w", padx=10, pady=5)
+
+    new_windows_tree = ttk.Treeview(right_frame, columns=("Window",), show="headings")
+    new_windows_tree.heading("Window", text="Window Title")
+    new_windows_tree.pack(fill=tk.BOTH, expand=True)
 
     # ComboBox for project selection
     selected_project = tk.StringVar()
     project_dropdown = ttk.Combobox(root, textvariable=selected_project)
     project_dropdown["values"] = projects
-    project_dropdown.pack()
+    project_dropdown.pack(pady=10)
 
-    # Assignments dictionary
+    # Assignments dictionaries
     assignments = {}
+    last_assignments = {}
+    new_assignments = {}
 
-    # Function to assign a selected project to a selected window
+    # Function to assign selected windows to a project
     def assign_project():
-        selected_item = tree.focus()  # Get selected item
-        if selected_item and selected_project.get():
-            assignments[selected_item] = selected_project.get()
-            tree.item(selected_item, values=(selected_item, selected_project.get()))
+        selected_items = new_windows_tree.selection()
+        if selected_items and selected_project.get():
+            project_name = selected_project.get()
 
-            # Save the top assignments file
-            save_top_assignments(assignments)
+            for item in selected_items:
+                # Update assignments dictionary
+                assignments[item] = project_name
+                
+                # Remove from new windows tree
+                new_windows_tree.delete(item)
+                
+                # Remove existing item if present
+                if tree.exists(item):
+                    tree.delete(item)
+                    
+                # Create project group if needed    
+                if not tree.exists(project_name):
+                    tree.insert("", tk.END, iid=project_name, text=project_name, open=True)
+                    
+                # Add to project group
+                tree.insert(project_name, tk.END, iid=item, text=item)
 
-            # Save programs assigned to the specific project
-            project_programs = [win for win, proj in assignments.items() if proj == selected_project.get()]
-            save_project_programs(selected_project.get(), project_programs)
+                # Save updated assignments
+                save_top_assignments(assignments)
+
+            # Save project-specific programs
+            project_programs = [w for w, p in assignments.items() if p == project_name]
+            save_project_programs(project_name, project_programs)
+
 
     # Assign button
     assign_button = ttk.Button(root, text="Assign to Project", command=assign_project)
-    assign_button.pack()
+    assign_button.pack(pady=5)
 
     # Start the real-time update thread
-    update_thread = Thread(target=update_assignments, args=(tree, assignments), daemon=True)
+    update_thread = Thread(target=update_assignments, args=(tree, new_windows_tree, assignments, last_assignments, new_assignments), daemon=True)
     update_thread.start()
 
     root.mainloop()
+
+
 
 
 if __name__ == "__main__":
