@@ -40,21 +40,21 @@ def save_top_assignments(assignments):
 
 
 # Function to save programs assigned to a specific project to its folder
-def save_project_programs(project_name, programs):
+def save_project_programs(project_name, programs_metadata):
     project_path = os.path.join(PROJECTS_PATH, project_name)
     project_file = os.path.join(project_path, "current_programs.json")
-    #print("saving to", project_file)
 
     # Ensure the project folder exists
     if not os.path.exists(project_path):
         os.makedirs(project_path, exist_ok=True)
 
-    # Save the programs to the project-specific JSON
+    # Save the programs metadata to the project-specific JSON
     try:
         with open(project_file, "w") as f:
-            json.dump(programs, f, indent=4)
+            json.dump(programs_metadata, f, indent=4)
     except Exception as e:
         print(f"Error saving project programs for {project_name}: {e}")
+
 
 # Function to close windows by title
 def close_windows_by_title(window_titles):
@@ -109,8 +109,11 @@ def close_active_project(active_project, assignments, tree):
     
 
     # Get next state number
-    existing_states = [int(f.replace("state", "")) for f in os.listdir(savestate_path) 
-                      if f.startswith("state") and f.endswith(".json")]
+    existing_states = [
+        int(f.replace("state", "").split(".")[0])  # Remove 'state' and extract the numeric part
+        for f in os.listdir(savestate_path)
+        if f.startswith("state") and f.endswith(".json")  # Ensure the file matches the expected pattern
+    ]
     next_state = max(existing_states, default=0) + 1
 
     # Copy last_state/state.json to savestate/state{n+1}.json if it exists
@@ -237,7 +240,6 @@ def update_assignments(tree, new_windows_tree, assignments, last_assignments, ne
         new_window_titles = current_window_titles - set(last_assignments.keys())
         for new_window_title in new_window_titles:
             if new_window_title not in assignments:
-                assignments[new_window_title] = "Unassigned"
                 new_assignments[new_window_title] = "Unassigned"
 
                 # Add to the "Newly Detected Windows" Treeview in a thread-safe manner
@@ -247,7 +249,6 @@ def update_assignments(tree, new_windows_tree, assignments, last_assignments, ne
         # Handle closed windows: Remove from assignments and last_assignments
         closed_window_titles = set(last_assignments.keys()) - current_window_titles
         for closed_window_title in closed_window_titles:
-            assignments.pop(closed_window_title, None)
             last_assignments.pop(closed_window_title, None)
 
             # Remove closed windows from the new windows tree
@@ -256,10 +257,16 @@ def update_assignments(tree, new_windows_tree, assignments, last_assignments, ne
 
         # Group and update the left-hand Treeview (group by project)
         assignment_groups = {}
+        metadata_by_project = {}
         for window_title, project in assignments.items():
             if project not in assignment_groups:
                 assignment_groups[project] = []
+                metadata_by_project[project] = {}
             assignment_groups[project].append(window_title)
+
+            # Collect metadata for each window
+            window_metadata = next((w for w in windows if w["title"] == window_title), {})
+            metadata_by_project[project][window_title] = window_metadata
 
         # Update the left-hand Treeview
         for project, group_windows in assignment_groups.items():
@@ -281,9 +288,9 @@ def update_assignments(tree, new_windows_tree, assignments, last_assignments, ne
 
         # Save updated assignments and project programs
         save_top_assignments(assignments)
-        for project, group_windows in assignment_groups.items():
+        for project, metadata in metadata_by_project.items():
             if project != "Unassigned":
-                save_project_programs(project, group_windows)
+                save_project_programs(project, metadata)
 
         # Update last_assignments to match the current state
         last_assignments.clear()
@@ -293,6 +300,7 @@ def update_assignments(tree, new_windows_tree, assignments, last_assignments, ne
         new_assignments.clear()
 
         time.sleep(2)
+
 
 
 
@@ -314,7 +322,7 @@ def setup_gui():
     left_label = tk.Label(left_frame, text="Assigned Windows by Project", font=("Arial", 12, "bold"))
     left_label.pack(anchor="w", padx=10, pady=5)
 
-    tree = ttk.Treeview(left_frame, show="tree", selectmode="extended")
+    tree = ttk.Treeview(left_frame, show="tree", selectmode="browse")
     tree.heading("#0", text="Assigned Windows by Project")
     tree.pack(fill=tk.BOTH, expand=True)
 
@@ -348,28 +356,54 @@ def setup_gui():
     last_assignments = {}
     new_assignments = {}
 
-        # Function to assign selected windows to a project
+        # Function to assign/reassign selected windows to a project
     def assign_project():
-        selected_items = new_windows_tree.selection()
+        selected_items = new_windows_tree.selection() + tree.selection()  # Combine selections from both tables
         if selected_items and selected_project.get():
             project_name = selected_project.get()
 
+            # Collect metadata for all assigned windows
+            project_metadata = {}
+
             for item in selected_items:
-                # Retrieve metadata before deleting the item
-                metadata_json = new_windows_tree.item(item, "values")[1]
-                metadata = json.loads(metadata_json)
+                metadata = {}
+
+                # Check if the item exists in the new windows tree
+                if new_windows_tree.exists(item):
+                    # Retrieve metadata before removing the item
+                    metadata_json = new_windows_tree.item(item, "values")
+                    if len(metadata_json) < 2:
+                        print(f"Error: Metadata missing for item {item}, values: {metadata_json}")
+                        continue
+                    metadata = json.loads(metadata_json[1])
+
+                    # Remove from the new windows tree
+                    new_windows_tree.delete(item)
+                elif tree.exists(item):
+                    # Retrieve metadata from the assigned windows tree
+                    for child in tree.get_children(item):
+                        text = tree.item(child, "text")
+                        if ": " in text:
+                            key, value = text.split(": ", 1)
+                            metadata[key] = value
+                        else:
+                            print(f"Skipping child node with unexpected text format: {text}")
+
+                    # Remove the window from its current project group
+                    for project in tree.get_children():
+                        if item in tree.get_children(project):
+                            tree.delete(item)
+                            break
+                else:
+                    continue  # Skip if the item doesn't exist in either tree
 
                 # Update assignments dictionary
                 assignments[item] = project_name
 
-                # Remove from new windows tree
-                new_windows_tree.delete(item)
+                # Add the window metadata to the project metadata
+                project_metadata[item] = metadata
 
-                # Remove existing item if present in the assigned tree
-                if tree.exists(item):
-                    tree.delete(item)
-
-                # Create project group if needed
+                # Add the window to the new project group
                 if not tree.exists(project_name):
                     tree.insert("", tk.END, iid=project_name, text=project_name, open=True)
 
@@ -383,9 +417,10 @@ def setup_gui():
             # Save updated assignments
             save_top_assignments(assignments)
 
-            # Save project-specific programs
-            project_programs = [w for w, p in assignments.items() if p == project_name]
-            save_project_programs(project_name, project_programs)
+            # Save project-specific programs with metadata
+            save_project_programs(project_name, project_metadata)
+
+
 
     # Assign button
     assign_button = ttk.Button(root, text="Assign to Project", command=assign_project)
