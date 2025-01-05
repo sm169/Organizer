@@ -13,3 +13,4 @@
 # Ignore specific folders
 node_modules/
 savedstates/
+newproject.py
